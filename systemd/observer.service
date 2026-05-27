@@ -1,0 +1,73 @@
+
+[Unit]
+
+Description=H4-robot HIP-4 Observer (Hyperliquid)
+
+After=network-online.target
+
+Wants=network-online.target
+
+
+
+[Service]
+
+Type=simple
+
+User=ubuntu
+
+Group=ubuntu
+
+WorkingDirectory=/home/ubuntu/H4-robot
+
+EnvironmentFile=/home/ubuntu/H4-robot/.env
+
+ExecStart=/home/ubuntu/H4-robot/.venv/bin/python /home/ubuntu/H4-robot/recorder.py
+
+
+
+# Restart policy
+
+Restart=always
+
+RestartSec=10
+
+StartLimitInterval=300
+
+StartLimitBurst=5
+
+
+
+# Resource limits
+
+LimitNOFILE=4096
+
+
+
+# Logging via systemd journal
+
+StandardOutput=journal
+
+StandardError=journal
+
+SyslogIdentifier=h4-observer
+
+
+
+# Security hardening
+
+NoNewPrivileges=true
+
+ProtectSystem=strict
+
+ProtectHome=read-only
+
+ReadWritePaths=/home/ubuntu/H4-robot/data /home/ubuntu/H4-robot/logs
+
+PrivateTmp=true
+
+
+
+[Install]
+
+WantedBy=multi-user.target
+

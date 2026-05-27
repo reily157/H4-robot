@@ -38,6 +38,7 @@ WS_URL = "wss://api.hyperliquid.xyz/ws"
 _BACKOFF_BASE_S = 1.0
 _BACKOFF_CAP_S = 60.0
 _BACKOFF_JITTER = 0.20          # ±20 % of the computed backoff
+_PING_INTERVAL_S = 30.0         # HL closes idle connections after ~10 min without ping
 
 
 # ─── Client ───────────────────────────────────────────────────────────────────
@@ -179,7 +180,22 @@ class WsClient:
                         await self._send_json(frame)
 
                     attempt = 0     # reset backoff after successful connect
-                    await self._recv_loop(ws)
+                    hb_task = asyncio.create_task(self._heartbeat(ws))
+                    try:
+                        await self._recv_loop(ws)
+                    finally:
+                        hb_task.cancel()
+                        try:
+                            await hb_task
+                        except asyncio.CancelledError:
+                            pass
+                        self._connected = False
+                        self._ws = None
+
+                # Server closed cleanly — 1s pause to avoid hammering HL on reconnect
+                if not self._stopping:
+                    log.info("connection closed cleanly — reconnecting in 1s")
+                    await asyncio.sleep(1.0)
 
             except asyncio.CancelledError:
                 break
@@ -204,6 +220,16 @@ class WsClient:
 
         self._connected = False
         log.debug("reconnect loop exited")
+
+    # ─── Heartbeat ────────────────────────────────────────────────────────
+
+    async def _heartbeat(self, ws: aiohttp.ClientWebSocketResponse) -> None:
+        """Send {"method": "ping"} every _PING_INTERVAL_S to prevent HL idle-close."""
+        while not ws.closed and not self._stopping:
+            await asyncio.sleep(_PING_INTERVAL_S)
+            if not ws.closed and not self._stopping:
+                log.debug("sending heartbeat ping")
+                await self._send_json({"method": "ping"})
 
     # ─── Receive loop ─────────────────────────────────────────────────────
 

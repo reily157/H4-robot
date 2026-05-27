@@ -106,6 +106,7 @@ class Store:
         if self.db_path != ":memory:":
             Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = duckdb.connect(self.db_path)
+        self._conn.execute("SET memory_limit = '512MB'")
         apply_pending(self._conn)
         log.info(f"store initialized: db_path={self.db_path}")
 

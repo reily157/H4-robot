@@ -257,7 +257,6 @@ class Recorder:
 
             self._dispatch(msg)
             msgs += 1
-
         log.info(f"recorder run finished — {msgs} messages processed")
 
     async def close(self) -> None:
@@ -368,3 +367,70 @@ class Recorder:
             self._store.enqueue_raw_ctx(
                 ts_local, ctx.market_id, "activeAssetCtx", ctx.raw_payload
             )
+
+
+
+
+
+# ─── Entry point ───────────────────────────────────────────────────────────────
+
+
+
+if __name__ == "__main__":
+
+    import asyncio
+
+    import logging
+
+    import os
+
+    from pathlib import Path
+
+
+
+    logging.basicConfig(
+
+        level=logging.INFO,
+
+        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+
+    )
+
+
+
+    DB_PATH = os.environ.get("H4_DB_PATH", "data/observer.duckdb")
+
+    HEALTH_PORT = int(os.environ.get("H4_HEALTH_PORT", "8765"))
+
+
+
+    Path("data").mkdir(exist_ok=True)
+
+    Path("logs").mkdir(exist_ok=True)
+
+
+
+    async def _main():
+
+        rec = Recorder(db_path=DB_PATH, health_port=HEALTH_PORT)
+
+        await rec.init()
+
+        # Run indefinitely (no duration_s param = run until interrupted)
+
+        try:
+
+            await rec.run()
+
+        except KeyboardInterrupt:
+
+            pass
+
+        finally:
+
+            await rec.close()
+
+
+
+    asyncio.run(_main())
+

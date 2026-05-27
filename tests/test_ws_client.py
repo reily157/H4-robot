@@ -221,3 +221,100 @@ async def test_connected_property_starts_false():
 
 # fix missing import in test_backoff_values
 import random
+
+
+# ─── Heartbeat tests ──────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_heartbeat_sends_ping_periodically():
+    """_heartbeat sends {"method": "ping"} at each interval while ws is open."""
+    import ws_client as wsc
+
+    client = WsClient()
+    fake_ws = _FakeWs([])
+    fake_ws.closed = False
+    client._ws = fake_ws   # needed by _send_json
+
+    with patch.object(wsc, "_PING_INTERVAL_S", 0.01):
+        task = asyncio.create_task(client._heartbeat(fake_ws))
+        await asyncio.sleep(0.06)   # ~5 intervals at 0.01s each
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    ping = {"method": "ping"}
+    assert fake_ws.sent.count(ping) >= 2, (
+        f"expected ≥2 pings, got {fake_ws.sent}"
+    )
+    assert all(f == ping for f in fake_ws.sent), (
+        f"unexpected frame sent: {fake_ws.sent}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_stops_when_ws_already_closed():
+    """_heartbeat returns immediately if ws.closed is True at entry."""
+    import ws_client as wsc
+
+    client = WsClient()
+    fake_ws = _FakeWs([])
+    fake_ws.closed = True
+    client._ws = fake_ws
+
+    with patch.object(wsc, "_PING_INTERVAL_S", 0.01):
+        # Should return quickly — while condition is False from the start
+        await asyncio.wait_for(client._heartbeat(fake_ws), timeout=0.5)
+
+    assert fake_ws.sent == [], "no ping should be sent on a closed ws"
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_does_not_send_while_stopping():
+    """_heartbeat sends nothing when _stopping is True."""
+    import ws_client as wsc
+
+    client = WsClient()
+    client._stopping = True
+    fake_ws = _FakeWs([])
+    fake_ws.closed = False
+    client._ws = fake_ws
+
+    with patch.object(wsc, "_PING_INTERVAL_S", 0.01):
+        await asyncio.wait_for(client._heartbeat(fake_ws), timeout=0.5)
+
+    assert fake_ws.sent == []
+
+
+@pytest.mark.asyncio
+async def test_heartbeat_cancelled_when_recv_loop_exits():
+    """
+    The hb_task pattern in _reconnect_loop: when _recv_loop exits, the
+    heartbeat task must be cancelled and fully awaited.
+    """
+    client = WsClient()
+    fake_ws = _FakeWs([_make_close_msg()])
+    fake_ws.closed = False
+    client._ws = fake_ws
+    client._stopping = False
+
+    fired: list[bool] = []
+
+    async def _slow_hb(_ws):
+        await asyncio.sleep(10)   # would fire after 10s if not cancelled
+        fired.append(True)
+
+    hb_task = asyncio.create_task(_slow_hb(fake_ws))
+    try:
+        await client._recv_loop(fake_ws)
+    finally:
+        hb_task.cancel()
+        try:
+            await hb_task
+        except asyncio.CancelledError:
+            pass
+
+    assert hb_task.done()
+    assert hb_task.cancelled(), "hb_task must be cancelled when recv_loop exits"
+    assert fired == [], "heartbeat must not fire after cancellation"
