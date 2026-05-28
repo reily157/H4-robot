@@ -201,9 +201,9 @@ class TestDispatchL2Book:
         rec._dispatch(msg)
         await store.flush()
 
-        rows = store.query("SELECT side, level_idx FROM book_levels ORDER BY side, level_idx")
+        rows = store.read_jsonl("book_levels")
         assert len(rows) == 3  # 2 bids + 1 ask
-        sides = {r[0] for r in rows}
+        sides = {r["side"] for r in rows}
         assert sides == {"bid", "ask"}
 
     @pytest.mark.asyncio
@@ -225,8 +225,8 @@ class TestDispatchL2Book:
         rec._dispatch(msg)
         await store.flush()
 
-        rows = store.query("SELECT coin FROM book_levels")
-        assert all(r[0] == "BTC" for r in rows)
+        rows = store.read_jsonl("book_levels")
+        assert all(r["coin"] == "BTC" for r in rows)
 
 
 # ─── _dispatch — trades ───────────────────────────────────────────────────────
@@ -249,9 +249,9 @@ class TestDispatchTrades:
         rec._dispatch(msg)
         await store.flush()
 
-        rows = store.query("SELECT side FROM trades")
+        rows = store.read_jsonl("trades")
         assert len(rows) == 2
-        sides = {r[0] for r in rows}
+        sides = {r["side"] for r in rows}
         assert sides == {"BUY", "SELL"}
 
     @pytest.mark.asyncio
@@ -281,10 +281,10 @@ class TestDispatchBbo:
         rec._dispatch(msg)
         await store.flush()
 
-        rows = store.query("SELECT bid_px, ask_px FROM bbo")
+        rows = store.read_jsonl("bbo")
         assert len(rows) == 1
-        assert rows[0][0] == pytest.approx(0.155)
-        assert rows[0][1] == pytest.approx(0.160)
+        assert rows[0]["bid_px"] == pytest.approx(0.155)
+        assert rows[0]["ask_px"] == pytest.approx(0.160)
 
 
 # ─── _dispatch — activeAssetCtx ───────────────────────────────────────────────
@@ -306,11 +306,11 @@ class TestDispatchActiveAssetCtx:
         rec._dispatch(msg)
         await store.flush()
 
-        rows = store.query("SELECT mark_px FROM perp_ctx")
+        rows = store.read_jsonl("perp_ctx")
         assert len(rows) == 1
-        assert rows[0][0] == pytest.approx(67000.0)
+        assert rows[0]["mark_px"] == pytest.approx(67000.0)
         # raw_ctx must be empty
-        assert store.query("SELECT COUNT(*) FROM raw_ctx")[0][0] == 0
+        assert len(store.read_jsonl("raw_ctx")) == 0
 
     @pytest.mark.asyncio
     async def test_hip4_ctx_goes_to_raw_ctx_table(self):
@@ -328,10 +328,10 @@ class TestDispatchActiveAssetCtx:
         rec._dispatch(msg)
         await store.flush()
 
-        rows = store.query("SELECT sub_type FROM raw_ctx")
+        rows = store.read_jsonl("raw_ctx")
         assert len(rows) == 1
-        assert rows[0][0] == "activeAssetCtx"
-        assert store.query("SELECT COUNT(*) FROM perp_ctx")[0][0] == 0
+        assert rows[0]["sub_type"] == "activeAssetCtx"
+        assert len(store.read_jsonl("perp_ctx")) == 0
 
 
 # ─── _dispatch — ignored messages ────────────────────────────────────────────
@@ -377,8 +377,13 @@ async def test_write_outcome_map_all_roles():
     )
     _write_outcome_map(store, "BTC_202605200600", REF_SPEC)
 
-    rows = store.query("SELECT role FROM outcomes_map ORDER BY role")
-    roles = {r[0] for r in rows}
+    _write_outcome_map(store, "BTC_202605200600", REF_SPEC)
+
+    # Read outcomes_map.jsonl directly
+    import json
+    omap_path = store.base_dir / "outcomes_map.jsonl"
+    rows = [json.loads(line) for line in omap_path.read_text().strip().split("\n") if line]
+    roles = {r["role"] for r in rows}
     assert "binary" in roles
     assert "fallback" in roles
     assert "named_0" in roles
@@ -413,9 +418,9 @@ async def test_run_processes_messages_from_queue():
     await rec.run(duration_s=0.2)
     await store.flush()
 
-    rows = store.query("SELECT coin FROM bbo")
+    rows = store.read_jsonl("bbo")
     assert len(rows) == 1
-    assert rows[0][0] == "#670"
+    assert rows[0]["coin"] == "#670"
 
 
 @pytest.mark.asyncio
